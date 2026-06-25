@@ -219,7 +219,7 @@ def plot_arrival_load(
 
         arrival_calendar_df,
 
-        x="Required Arrival",
+        x="Arrival Date",
 
         y="Media Qty (Sq Ft)",
 

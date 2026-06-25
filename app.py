@@ -705,3 +705,452 @@ if st.session_state.project_loaded:
 # =====================================================
 # END OF PART 2
 # =====================================================
+
+# =====================================================
+# PART 3
+# PRODUCTION PLANNING ENGINE
+# =====================================================
+
+if st.session_state.project_loaded:
+
+    st.header("Production Planning")
+
+    # =================================================
+    # LOAD DATA
+    # =================================================
+
+    district_timeline_df = (
+        st.session_state.district_timeline_df
+    )
+
+    timeline_kpis = (
+        st.session_state.timeline_kpis
+    )
+
+    total_project_sqft = (
+        district_timeline_df[
+            "District Sq Ft"
+        ].sum()
+    )
+
+    # =================================================
+    # PROJECT DATES
+    # =================================================
+
+    project_start = (
+        district_timeline_df[
+            "District Start"
+        ].min()
+    )
+
+    project_end = (
+        district_timeline_df[
+            "District Finish"
+        ].max()
+    )
+
+    # =================================================
+    # BUILD DAILY PRODUCTION
+    # =================================================
+
+    production_rows = []
+
+    date_range = pd.date_range(
+        project_start,
+        project_end,
+        freq="D"
+    )
+
+    for current_date in date_range:
+
+        active_records = district_timeline_df[
+
+            (
+                district_timeline_df[
+                    "District Start"
+                ] <= current_date
+            )
+
+            &
+
+            (
+                district_timeline_df[
+                    "District Finish"
+                ] >= current_date
+            )
+
+        ]
+
+        active_teams = (
+            active_records[
+                "Team Name"
+            ].nunique()
+        )
+
+        daily_sqft = (
+            active_teams
+            * real_productivity
+        )
+
+        production_rows.append({
+
+            "Date":
+                current_date,
+
+            "Active Teams":
+                active_teams,
+
+            "Daily Production":
+                round(daily_sqft, 2)
+
+        })
+
+    production_df = pd.DataFrame(
+        production_rows
+    )
+
+    # =================================================
+    # WEEKLY PRODUCTION
+    # =================================================
+
+    production_df["Week"] = (
+        production_df["Date"]
+        .dt.to_period("W")
+        .astype(str)
+    )
+
+    weekly_production_df = (
+
+        production_df
+
+        .groupby(
+            "Week",
+            as_index=False
+        )
+
+        .agg({
+
+            "Daily Production":
+                "sum",
+
+            "Active Teams":
+                "max"
+
+        })
+
+    )
+
+    weekly_production_df.rename(
+
+        columns={
+
+            "Daily Production":
+                "Campaign Sq Ft"
+
+        },
+
+        inplace=True
+
+    )
+
+    # =================================================
+    # MEDIA FORECAST
+    # =================================================
+
+    media_forecast_df = (
+        weekly_production_df.copy()
+    )
+
+    media_forecast_df[
+        "Media Requirement"
+    ] = (
+
+        media_forecast_df[
+            "Campaign Sq Ft"
+        ]
+
+        *
+
+        (
+            1 +
+            printing_wastage / 100
+        )
+
+    )
+
+    # =================================================
+    # GUM FORECAST
+    # =================================================
+
+    gum_forecast_df = (
+        weekly_production_df.copy()
+    )
+
+    gum_forecast_df[
+        "Gum Required (Kg)"
+    ] = (
+
+        gum_forecast_df[
+            "Campaign Sq Ft"
+        ]
+
+        /
+
+        1000
+
+        *
+
+        gum_per_1000_sqft
+
+    )
+
+    # =================================================
+    # CUMULATIVE FORECAST
+    # =================================================
+
+    campaign_forecast_df = (
+        weekly_production_df.copy()
+    )
+
+    campaign_forecast_df[
+        "Cumulative Sq Ft"
+    ] = (
+
+        campaign_forecast_df[
+            "Campaign Sq Ft"
+        ]
+
+        .cumsum()
+
+    )
+
+    campaign_forecast_df[
+        "Completion %"
+    ] = (
+
+        campaign_forecast_df[
+            "Cumulative Sq Ft"
+        ]
+
+        /
+
+        total_project_sqft
+
+        *
+
+        100
+
+    )
+
+    # =================================================
+    # PRODUCTION KPIs
+    # =================================================
+
+    total_media_required = (
+
+        media_forecast_df[
+            "Media Requirement"
+        ]
+
+        .sum()
+
+    )
+
+    total_gum_required = (
+
+        gum_forecast_df[
+            "Gum Required (Kg)"
+        ]
+
+        .sum()
+
+    )
+
+    total_rolls_required = int(
+
+        np.ceil(
+
+            total_media_required
+
+            /
+
+            roll_size_sqft
+
+        )
+
+    )
+
+    production_kpis = {
+
+        "Project Sq Ft":
+            round(
+                total_project_sqft,
+                2
+            ),
+
+        "Media Required":
+            round(
+                total_media_required,
+                2
+            ),
+
+        "Gum Required":
+            round(
+                total_gum_required,
+                2
+            ),
+
+        "Rolls Required":
+            total_rolls_required
+
+    }
+
+    # =================================================
+    # SAVE TO SESSION
+    # =================================================
+
+    st.session_state.production_df = (
+        production_df
+    )
+
+    st.session_state.weekly_production_df = (
+        weekly_production_df
+    )
+
+    st.session_state.media_forecast_df = (
+        media_forecast_df
+    )
+
+    st.session_state.gum_forecast_df = (
+        gum_forecast_df
+    )
+
+    st.session_state.campaign_forecast_df = (
+        campaign_forecast_df
+    )
+
+    st.session_state.production_kpis = (
+        production_kpis
+    )
+
+    # =================================================
+    # KPI CARDS
+    # =================================================
+
+    k1, k2, k3, k4 = st.columns(4)
+
+    with k1:
+
+        st.metric(
+            "Project Sq Ft",
+            f"{total_project_sqft:,.0f}"
+        )
+
+    with k2:
+
+        st.metric(
+            "Media Required",
+            f"{total_media_required:,.0f}"
+        )
+
+    with k3:
+
+        st.metric(
+            "Gum Required (Kg)",
+            f"{total_gum_required:,.0f}"
+        )
+
+    with k4:
+
+        st.metric(
+            "Rolls Required",
+            f"{total_rolls_required:,}"
+        )
+
+    st.divider()
+
+    # =================================================
+    # PRODUCTION TABS
+    # =================================================
+
+    prod_tab1, prod_tab2, prod_tab3, prod_tab4 = st.tabs(
+
+        [
+
+            "Daily Production",
+
+            "Weekly Production",
+
+            "Media Forecast",
+
+            "Gum Forecast"
+
+        ]
+
+    )
+
+    # =================================================
+    # DAILY PRODUCTION
+    # =================================================
+
+    with prod_tab1:
+
+        st.subheader(
+            "Daily Production Plan"
+        )
+
+        st.dataframe(
+            production_df,
+            use_container_width=True
+        )
+
+    # =================================================
+    # WEEKLY PRODUCTION
+    # =================================================
+
+    with prod_tab2:
+
+        st.subheader(
+            "Weekly Production Forecast"
+        )
+
+        st.dataframe(
+            weekly_production_df,
+            use_container_width=True
+        )
+
+    # =================================================
+    # MEDIA FORECAST
+    # =================================================
+
+    with prod_tab3:
+
+        st.subheader(
+            "Media Requirement Forecast"
+        )
+
+        st.dataframe(
+            media_forecast_df,
+            use_container_width=True
+        )
+
+    # =================================================
+    # GUM FORECAST
+    # =================================================
+
+    with prod_tab4:
+
+        st.subheader(
+            "Gum Requirement Forecast"
+        )
+
+        st.dataframe(
+            gum_forecast_df,
+            use_container_width=True
+        )
+
+    st.divider()
+
+# =====================================================
+# END OF PART 3
+# =====================================================

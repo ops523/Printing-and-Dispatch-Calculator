@@ -4,6 +4,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from modules.scenario_analysis import (
+    dispatch_cycle_comparison
+)
+
 from modules.calculations import (
     validate_deployment_file,
     calculate_effective_productivity,
@@ -350,6 +354,18 @@ roll_summary_df = (
     )
 )
 
+comparison_df = (
+    dispatch_cycle_comparison(
+
+        daily_campaign_production,
+
+        total_campaign_sqft,
+
+        gum_per_1000_sqft
+
+    )
+)
+
 # --------------------------------------------------
 # KPI DASHBOARD
 # --------------------------------------------------
@@ -554,6 +570,36 @@ st.plotly_chart(
 st.header("Roll Summary")
 st.dataframe(
     roll_summary_df,
+    use_container_width=True
+)
+
+st.header(
+    "Dispatch Cycle Comparison"
+)
+
+st.dataframe(
+    comparison_df,
+    use_container_width=True
+)
+
+st.subheader(
+    "Dispatch Cycle vs Dispatch Count"
+)
+
+fig_compare = px.line(
+
+    comparison_df,
+
+    x="Dispatch Cycle",
+
+    y="Dispatches",
+
+    markers=True
+
+)
+
+st.plotly_chart(
+    fig_compare,
     use_container_width=True
 )
 

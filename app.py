@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 from modules.calculations import (
     validate_deployment_file,
@@ -320,6 +321,9 @@ dispatch_schedule_df = (
         gum_per_1000_sqft
     )
 )
+campaign_duration_days = len(
+    dispatch_schedule_df
+) * dispatch_cycle_days
 
 dispatch_manifest_df = (
     generate_dispatch_manifest(
@@ -407,7 +411,7 @@ kpi_dashboard = build_kpi_dashboard(
 
 st.header("Campaign Dashboard")
 
-k1, k2, k3, k4 = st.columns(4)
+k1, k2, k3, k4, k5 = st.columns(5)
 
 k1.metric(
     "Teams",
@@ -415,16 +419,21 @@ k1.metric(
 )
 
 k2.metric(
+    "Campaign Duration",
+    f"{campaign_duration_days} Days"
+)
+
+k3.metric(
     "Daily Production",
     f"{daily_campaign_production:,.0f}"
 )
 
-k3.metric(
+k4.metric(
     "Media/Dispatch",
     f"{dispatch_media_qty:,.0f}"
 )
 
-k4.metric(
+k5.metric(
     "Gum/Dispatch",
     f"{dispatch_gum_qty:,.1f} Kg"
 )
@@ -451,9 +460,61 @@ st.dataframe(
     use_container_width=True
 )
 
+st.subheader(
+    "State-wise Media Allocation"
+)
+
+fig_state = px.bar(
+
+    state_allocation_df,
+
+    x="State",
+
+    y="Media Qty (Sq Ft)",
+
+    title="Media Allocation by State"
+
+)
+
+st.plotly_chart(
+    fig_state,
+    use_container_width=True
+)
+
 st.header("Dispatch Schedule")
 st.dataframe(
     dispatch_schedule_df,
+    use_container_width=True
+)
+
+st.subheader(
+    "Dispatch Timeline"
+)
+
+timeline_df = dispatch_schedule_df.copy()
+
+timeline_df["Dispatch"] = (
+    "Dispatch "
+    +
+    timeline_df["Dispatch No"].astype(str)
+)
+
+fig_timeline = px.scatter(
+
+    timeline_df,
+
+    x="Dispatch Date",
+
+    y="Dispatch",
+
+    size="Media Qty (Sq Ft)",
+
+    title="Dispatch Timeline"
+
+)
+
+st.plotly_chart(
+    fig_timeline,
     use_container_width=True
 )
 
@@ -466,6 +527,27 @@ st.dataframe(
 st.header("Printing Plan")
 st.dataframe(
     printing_plan_df,
+    use_container_width=True
+)
+
+st.subheader(
+    "Printing Load by Dispatch"
+)
+
+fig_print = px.bar(
+
+    printing_plan_df,
+
+    x="Dispatch No",
+
+    y="Media Qty (Sq Ft)",
+
+    title="Media Qty per Dispatch"
+
+)
+
+st.plotly_chart(
+    fig_print,
     use_container_width=True
 )
 

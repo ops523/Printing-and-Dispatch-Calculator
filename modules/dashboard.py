@@ -215,11 +215,18 @@ def plot_arrival_load(
     arrival_calendar_df
 ):
 
+    if "Arrival Date" in arrival_calendar_df.columns:
+        date_col = "Arrival Date"
+    elif "Required Arrival" in arrival_calendar_df.columns:
+        date_col = "Required Arrival"
+    else:
+        return None
+
     fig = px.bar(
 
         arrival_calendar_df,
 
-        x="Arrival Date",
+        x=date_col,
 
         y="Media Qty (Sq Ft)",
 
@@ -232,8 +239,7 @@ def plot_arrival_load(
     )
 
     return fig
-
-
+    
 # --------------------------------------------------
 # ROLL INVENTORY TREND
 # --------------------------------------------------

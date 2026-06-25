@@ -1,18 +1,37 @@
 # modules/printing.py
 
 import pandas as pd
-from datetime import timedelta
+import math
 
 
-def generate_printing_plan(
-    dispatch_schedule_df,
-    printing_lead_days,
-    printer_capacity_per_day,
-    media_width_ft,
-    media_gsm
+# --------------------------------------------------
+# PRINT DAYS REQUIRED
+# --------------------------------------------------
+
+def calculate_print_days(
+    media_qty_sqft,
+    printer_capacity_per_day=20000
 ):
     """
-    Generate printing plan from dispatch schedule.
+    Number of printing days required.
+    """
+
+    return math.ceil(
+        media_qty_sqft /
+        printer_capacity_per_day
+    )
+
+
+# --------------------------------------------------
+# PRINT SCHEDULE
+# --------------------------------------------------
+
+def generate_print_schedule(
+    dispatch_schedule_df,
+    printer_capacity_per_day=20000
+):
+    """
+    Generate realistic print schedule.
     """
 
     rows = []
@@ -23,48 +42,24 @@ def generate_printing_plan(
 
         dispatch_date = row["Dispatch Date"]
 
-        media_qty = row["Media Qty (Sq Ft)"]
+        media_qty = row[
+            "Media Qty (Sq Ft)"
+        ]
 
-        print_start = (
-            dispatch_date -
-            timedelta(days=printing_lead_days)
-        )
-
-        print_days_required = max(
-            1,
-            round(
-                media_qty /
-                printer_capacity_per_day,
-                2
-            )
+        print_days = calculate_print_days(
+            media_qty,
+            printer_capacity_per_day
         )
 
         print_end = (
             dispatch_date -
-            timedelta(days=1)
+            pd.Timedelta(days=1)
         )
 
-        running_feet = calculate_running_feet(
-            media_qty,
-            media_width_ft
-        )
-
-        media_weight = calculate_media_weight(
-            media_qty,
-            media_gsm
-        )
-
-        utilization_pct = min(
-            100,
-            round(
-                (
-                    media_qty /
-                    (
-                        printer_capacity_per_day *
-                        max(1, printing_lead_days)
-                    )
-                ) * 100,
-                1
+        print_start = (
+            print_end -
+            pd.Timedelta(
+                days=print_days - 1
             )
         )
 
@@ -73,243 +68,376 @@ def generate_printing_plan(
             "Dispatch No":
                 dispatch_no,
 
+            "Media Qty (Sq Ft)":
+                round(media_qty, 2),
+
+            "Dispatch Date":
+                dispatch_date,
+
             "Print Start":
                 print_start,
 
             "Print End":
                 print_end,
 
-            "Dispatch Date":
-                dispatch_date,
+            "Print Days":
+                print_days,
 
-            "Media Qty (Sq Ft)":
-                round(media_qty, 2),
-
-            "Running Feet":
-                round(running_feet, 2),
-
-            "Media Weight (Kg)":
-                round(media_weight, 2),
-
-            "Print Days Required":
-                print_days_required,
-
-            "Printer Utilization %":
-                utilization_pct
+            "Printer Capacity":
+                printer_capacity_per_day
 
         })
 
     return pd.DataFrame(rows)
 
 
-def calculate_running_feet(
-    media_sqft,
-    media_width_ft
+# --------------------------------------------------
+# DAILY PRINT PLAN
+# --------------------------------------------------
+
+def generate_daily_print_plan(
+    print_schedule_df,
+    printer_capacity_per_day=20000
 ):
     """
-    Running feet requirement.
-    """
-
-    if media_width_ft <= 0:
-        return 0
-
-    return (
-        media_sqft /
-        media_width_ft
-    )
-
-
-def calculate_media_weight(
-    media_sqft,
-    gsm
-):
-    """
-    Media weight estimation.
-
-    1 sqft = 0.092903 sqm
-    """
-
-    sqm = (
-        media_sqft *
-        0.092903
-    )
-
-    weight = (
-        sqm *
-        gsm
-    ) / 1000
-
-    return weight
-
-
-def generate_daily_print_load(
-    printing_plan_df,
-    printer_capacity_per_day
-):
-    """
-    Daily print load analysis.
+    Expand schedule into daily printing plan.
     """
 
     rows = []
 
-    for _, row in printing_plan_df.iterrows():
+    for _, row in print_schedule_df.iterrows():
+
+        dispatch_no = row["Dispatch No"]
 
         media_qty = row[
             "Media Qty (Sq Ft)"
         ]
 
-        required_days = (
-            media_qty /
-            printer_capacity_per_day
-        )
+        start_date = row[
+            "Print Start"
+        ]
 
-        rows.append({
+        end_date = row[
+            "Print End"
+        ]
 
-            "Dispatch No":
-                row["Dispatch No"],
+        remaining_qty = media_qty
 
-            "Media Qty":
-                round(media_qty, 2),
+        current_date = start_date
 
-            "Printer Capacity":
+        while current_date <= end_date:
+
+            daily_qty = min(
                 printer_capacity_per_day,
+                remaining_qty
+            )
 
-            "Days Required":
-                round(required_days, 2)
+            rows.append({
 
-        })
+                "Print Date":
+                    current_date,
+
+                "Dispatch No":
+                    dispatch_no,
+
+                "Daily Print Qty":
+                    round(
+                        daily_qty,
+                        2
+                    )
+
+            })
+
+            remaining_qty -= daily_qty
+
+            current_date += (
+                pd.Timedelta(days=1)
+            )
 
     return pd.DataFrame(rows)
 
 
-def generate_printer_loading_dashboard(
-    printing_plan_df,
-    printer_capacity_per_day
+# --------------------------------------------------
+# PRINTER LOADING
+# --------------------------------------------------
+
+def generate_printer_loading(
+    daily_print_df,
+    printer_capacity_per_day=20000
 ):
     """
-    Printer KPI Summary.
+    Daily printer loading.
+    """
+
+    loading = (
+
+        daily_print_df
+
+        .groupby(
+            "Print Date",
+            as_index=False
+        )
+
+        .agg({
+
+            "Daily Print Qty":
+                "sum"
+
+        })
+
+    )
+
+    loading["Capacity"] = (
+        printer_capacity_per_day
+    )
+
+    loading["Utilization %"] = (
+
+        loading[
+            "Daily Print Qty"
+        ]
+
+        /
+
+        printer_capacity_per_day
+
+        *
+
+        100
+
+    ).round(1)
+
+    loading["Over Capacity"] = (
+
+        loading[
+            "Daily Print Qty"
+        ]
+
+        >
+
+        printer_capacity_per_day
+
+    )
+
+    return loading
+
+
+# --------------------------------------------------
+# CAPACITY CHECK
+# --------------------------------------------------
+
+def identify_capacity_conflicts(
+    loading_df
+):
+    """
+    Detect overloaded print days.
+    """
+
+    conflicts = loading_df[
+        loading_df[
+            "Over Capacity"
+        ]
+    ]
+
+    return conflicts
+
+
+# --------------------------------------------------
+# WEEKLY PRINT FORECAST
+# --------------------------------------------------
+
+def generate_weekly_print_forecast(
+    daily_print_df
+):
+    """
+    Weekly printing requirement.
+    """
+
+    df = daily_print_df.copy()
+
+    df["Week"] = (
+
+        df["Print Date"]
+
+        .dt.isocalendar()
+
+        .week
+
+    )
+
+    weekly = (
+
+        df
+
+        .groupby(
+            "Week",
+            as_index=False
+        )
+
+        .agg({
+
+            "Daily Print Qty":
+                "sum"
+
+        })
+
+    )
+
+    weekly.rename(
+
+        columns={
+
+            "Daily Print Qty":
+                "Weekly Print Qty"
+
+        },
+
+        inplace=True
+
+    )
+
+    return weekly
+
+
+# --------------------------------------------------
+# PRINTING KPI
+# --------------------------------------------------
+
+def build_printing_kpis(
+    print_schedule_df,
+    loading_df
+):
+    """
+    Printing dashboard metrics.
     """
 
     total_media = (
-        printing_plan_df[
+
+        print_schedule_df[
             "Media Qty (Sq Ft)"
         ]
+
         .sum()
+
+    )
+
+    total_dispatches = len(
+        print_schedule_df
     )
 
     avg_utilization = (
-        printing_plan_df[
-            "Printer Utilization %"
+
+        loading_df[
+            "Utilization %"
         ]
+
         .mean()
+
     )
 
-    total_running_feet = (
-        printing_plan_df[
-            "Running Feet"
-        ]
-        .sum()
-    )
+    max_utilization = (
 
-    total_weight = (
-        printing_plan_df[
-            "Media Weight (Kg)"
+        loading_df[
+            "Utilization %"
         ]
-        .sum()
+
+        .max()
+
     )
 
     return {
 
-        "Total Media Qty":
+        "Total Media Printed":
             round(total_media, 2),
 
-        "Printer Capacity/Day":
-            printer_capacity_per_day,
+        "Total Dispatches":
+            total_dispatches,
 
         "Average Utilization %":
-            round(avg_utilization, 2),
+            round(avg_utilization, 1),
 
-        "Total Running Feet":
-            round(total_running_feet, 2),
-
-        "Total Media Weight":
-            round(total_weight, 2)
+        "Peak Utilization %":
+            round(max_utilization, 1)
 
     }
 
 
-def generate_roll_requirement(
+# --------------------------------------------------
+# PRINT QUEUE VIEW
+# --------------------------------------------------
+
+def build_print_queue(
+    print_schedule_df
+):
+    """
+    Operations print queue.
+    """
+
+    queue = (
+
+        print_schedule_df
+
+        .sort_values(
+            "Print Start"
+        )
+
+        .reset_index(
+            drop=True
+        )
+
+    )
+
+    return queue
+
+
+# --------------------------------------------------
+# ROLL REQUIREMENT
+# --------------------------------------------------
+
+def calculate_roll_requirement(
     media_qty_sqft,
-    media_width_ft,
-    roll_length_ft
+    roll_size_sqft=1250
 ):
     """
-    Estimate roll requirement.
-
-    Example:
-    Roll Length = 500 ft
-    Width = 4 ft
+    Rolls required.
     """
 
-    if media_width_ft <= 0:
-        return 0
-
-    running_feet = (
+    return math.ceil(
         media_qty_sqft /
-        media_width_ft
-    )
-
-    rolls = (
-        running_feet /
-        roll_length_ft
-    )
-
-    return round(
-        rolls,
-        2
+        roll_size_sqft
     )
 
 
-def build_roll_summary(
-    printing_plan_df,
-    media_width_ft,
-    roll_length_ft
+# --------------------------------------------------
+# PRINT MATERIAL PLAN
+# --------------------------------------------------
+
+def build_print_material_plan(
+    print_schedule_df,
+    roll_size_sqft=1250
 ):
     """
-    Roll consumption summary.
+    Roll requirement by dispatch.
     """
 
-    rows = []
+    df = print_schedule_df.copy()
 
-    for _, row in (
-        printing_plan_df.iterrows()
-    ):
+    df["Rolls Required"] = (
 
-        rolls = generate_roll_requirement(
+        df[
+            "Media Qty (Sq Ft)"
+        ]
 
-            row[
-                "Media Qty (Sq Ft)"
-            ],
+        .apply(
 
-            media_width_ft,
-
-            roll_length_ft
+            lambda x:
+            calculate_roll_requirement(
+                x,
+                roll_size_sqft
+            )
 
         )
 
-        rows.append({
+    )
 
-            "Dispatch No":
-                row["Dispatch No"],
-
-            "Media Qty":
-                row[
-                    "Media Qty (Sq Ft)"
-                ],
-
-            "Rolls Required":
-                rolls
-
-        })
-
-    return pd.DataFrame(rows)
+    return df

@@ -3193,9 +3193,9 @@ if (
 
     with k8:
 
-    st.metric(
-        "Forecast Finish",
-        revised_completion_date.strftime("%d-%b-%Y")
+        st.metric(
+            "Forecast Finish",
+            revised_completion_date.strftime("%d-%b-%Y")
         )
 
     st.divider()

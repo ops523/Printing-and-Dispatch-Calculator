@@ -1,283 +1,399 @@
 # modules/dispatch.py
 
 import pandas as pd
-from datetime import timedelta
+import math
 
 
-def generate_dispatch_schedule(
-    campaign_start_date,
-    total_campaign_sqft,
-    daily_campaign_production,
-    dispatch_cycle_days,
-    transit_days,
-    arrival_buffer_days,
+# --------------------------------------------------
+# TEAM DISPATCH REQUIREMENT
+# --------------------------------------------------
+
+def generate_team_dispatch_plan(
+    team_production_df,
+    dispatch_coverage_days=10,
+    transit_days=3,
+    arrival_buffer_days=2,
+    wastage_pct=12,
     gum_per_1000_sqft=5
 ):
     """
-    Generate complete dispatch schedule.
-
-    Logic:
-
-    Dispatch Qty
-    =
-    Daily Production × Dispatch Cycle
-
-    Replenishment Dispatch Date
-    =
-    Exhaustion Date
-    -
-    Arrival Buffer
-    -
-    Transit Time
+    Dispatch plan by team.
     """
-
-    dispatch_qty = (
-        daily_campaign_production *
-        dispatch_cycle_days
-    )
-
-    total_cycles = max(
-        1,
-        int(
-            (
-                total_campaign_sqft +
-                dispatch_qty - 1
-            ) // dispatch_qty
-        )
-    )
 
     rows = []
 
-    remaining_sqft = total_campaign_sqft
+    for _, row in team_production_df.iterrows():
 
-    current_dispatch_date = campaign_start_date
+        team = row["Team Name"]
 
-    for dispatch_no in range(
-        1,
-        total_cycles + 1
-    ):
+        start_date = row["Team Start Date"]
 
-        media_qty = min(
-            dispatch_qty,
-            remaining_sqft
-        )
+        completion_date = row[
+            "Projected Completion Date"
+        ]
 
-        gum_qty = (
-            media_qty /
-            1000
-        ) * gum_per_1000_sqft
+        productivity = row[
+            "Real Productivity"
+        ]
 
-        arrival_date = (
-            current_dispatch_date +
-            timedelta(
-                days=transit_days
+        current_start = start_date
+
+        dispatch_no = 1
+
+        while current_start < completion_date:
+
+            cycle_production = (
+                productivity *
+                dispatch_coverage_days
             )
-        )
 
-        coverage_start = arrival_date
-
-        coverage_end = (
-            coverage_start +
-            timedelta(
-                days=dispatch_cycle_days
+            media_qty = (
+                cycle_production *
+                (1 + wastage_pct / 100)
             )
-        )
 
-        exhaustion_date = coverage_end
-
-        next_dispatch_trigger = (
-            exhaustion_date -
-            timedelta(
-                days=arrival_buffer_days
-            ) -
-            timedelta(
-                days=transit_days
+            gum_qty = (
+                cycle_production /
+                1000 *
+                gum_per_1000_sqft
             )
-        )
 
-        rows.append({
+            exhaustion_date = (
+                current_start +
+                pd.Timedelta(
+                    days=dispatch_coverage_days
+                )
+            )
 
-            "Dispatch No":
-                dispatch_no,
+            required_arrival = (
+                exhaustion_date -
+                pd.Timedelta(
+                    days=arrival_buffer_days
+                )
+            )
 
-            "Dispatch Date":
-                current_dispatch_date,
+            dispatch_date = (
+                required_arrival -
+                pd.Timedelta(
+                    days=transit_days
+                )
+            )
 
-            "Arrival Date":
-                arrival_date,
+            rows.append({
 
-            "Coverage Start":
-                coverage_start,
-
-            "Coverage End":
-                coverage_end,
-
-            "Media Exhaustion":
-                exhaustion_date,
-
-            "Next Dispatch Trigger":
-                next_dispatch_trigger,
-
-            "Media Qty (Sq Ft)":
-                round(media_qty, 2),
-
-            "Gum Qty (Kg)":
-                round(gum_qty, 2)
-
-        })
-
-        remaining_sqft -= media_qty
-
-        current_dispatch_date = (
-            next_dispatch_trigger
-        )
-
-        if remaining_sqft <= 0:
-            break
-
-    return pd.DataFrame(rows)
-
-
-def generate_dispatch_manifest(
-    dispatch_schedule_df,
-    state_allocation_df
-):
-    """
-    Create detailed dispatch manifest
-    for every dispatch cycle.
-    """
-
-    manifest_rows = []
-
-    for _, dispatch in (
-        dispatch_schedule_df.iterrows()
-    ):
-
-        dispatch_no = (
-            dispatch["Dispatch No"]
-        )
-
-        dispatch_date = (
-            dispatch["Dispatch Date"]
-        )
-
-        for _, state in (
-            state_allocation_df.iterrows()
-        ):
-
-            manifest_rows.append({
+                "Team Name":
+                    team,
 
                 "Dispatch No":
                     dispatch_no,
 
+                "Cycle Start":
+                    current_start,
+
+                "Cycle End":
+                    exhaustion_date,
+
                 "Dispatch Date":
                     dispatch_date,
 
-                "State":
-                    state["State"],
-
-                "Teams":
-                    state["Teams"],
+                "Required Arrival":
+                    required_arrival,
 
                 "Media Qty (Sq Ft)":
-                    state[
-                        "Media Qty (Sq Ft)"
-                    ],
+                    round(
+                        media_qty,
+                        2
+                    ),
 
                 "Gum Qty (Kg)":
-                    state[
-                        "Gum Qty (Kg)"
-                    ]
+                    round(
+                        gum_qty,
+                        2
+                    )
 
             })
 
-    return pd.DataFrame(
-        manifest_rows
-    )
+            current_start = exhaustion_date
+
+            dispatch_no += 1
+
+    return pd.DataFrame(rows)
 
 
-def calculate_field_inventory_days(
-    dispatch_cycle_days,
-    arrival_buffer_days
+# --------------------------------------------------
+# TEAM + DISTRICT DISPATCH
+# --------------------------------------------------
+
+def generate_team_district_dispatch_plan(
+    team_plan_df,
+    team_production_df,
+    dispatch_coverage_days=10,
+    transit_days=3,
+    arrival_buffer_days=2,
+    wastage_pct=12,
+    gum_per_1000_sqft=5
 ):
     """
-    Inventory available at site.
-
-    Example:
-
-    Dispatch Cycle
-    = 7 days
-
-    Arrival Buffer
-    = 2 days
-
-    Inventory Coverage
-    = 9 days
+    Dispatch planning with district visibility.
     """
 
-    return (
-        dispatch_cycle_days +
-        arrival_buffer_days
+    dispatch_df = generate_team_dispatch_plan(
+        team_production_df,
+        dispatch_coverage_days,
+        transit_days,
+        arrival_buffer_days,
+        wastage_pct,
+        gum_per_1000_sqft
     )
 
+    merged = dispatch_df.merge(
 
-def generate_replenishment_calendar(
-    dispatch_schedule_df
+        team_plan_df[
+
+            [
+                "Team Name",
+                "State",
+                "District"
+            ]
+
+        ],
+
+        on="Team Name",
+
+        how="left"
+
+    )
+
+    return merged
+
+
+# --------------------------------------------------
+# DAILY DISPATCH CALENDAR
+# --------------------------------------------------
+
+def generate_dispatch_calendar(
+    dispatch_df
 ):
     """
-    Simple replenishment calendar.
-    Useful for dashboard view.
+    Daily dispatch schedule.
     """
 
-    calendar_rows = []
+    calendar = (
 
-    for _, row in (
-        dispatch_schedule_df.iterrows()
-    ):
+        dispatch_df
 
-        calendar_rows.append({
+        .groupby(
+            "Dispatch Date",
+            as_index=False
+        )
 
-            "Date":
-                row[
-                    "Next Dispatch Trigger"
-                ],
+        .agg({
 
-            "Activity":
-                (
-                    "Trigger Dispatch "
-                    f"#{row['Dispatch No'] + 1}"
+            "Media Qty (Sq Ft)":
+                "sum",
+
+            "Gum Qty (Kg)":
+                "sum",
+
+            "Team Name":
+                "nunique"
+
+        })
+
+    )
+
+    calendar.rename(
+
+        columns={
+
+            "Team Name":
+                "Teams Covered"
+
+        },
+
+        inplace=True
+
+    )
+
+    return calendar
+
+
+# --------------------------------------------------
+# ARRIVAL CALENDAR
+# --------------------------------------------------
+
+def generate_arrival_calendar(
+    dispatch_df
+):
+    """
+    Material arrival calendar.
+    """
+
+    arrivals = (
+
+        dispatch_df
+
+        .groupby(
+            "Required Arrival",
+            as_index=False
+        )
+
+        .agg({
+
+            "Media Qty (Sq Ft)":
+                "sum",
+
+            "Gum Qty (Kg)":
+                "sum"
+
+        })
+
+    )
+
+    return arrivals
+
+
+# --------------------------------------------------
+# TEAM MEDIA CONSUMPTION
+# --------------------------------------------------
+
+def generate_team_consumption_plan(
+    team_production_df,
+    gum_per_1000_sqft=5
+):
+    """
+    Daily consumption rates.
+    """
+
+    df = team_production_df.copy()
+
+    df["Daily Media Consumption"] = (
+        df["Real Productivity"]
+    )
+
+    df["Daily Gum Consumption"] = (
+
+        df["Real Productivity"]
+
+        /
+
+        1000
+
+        *
+
+        gum_per_1000_sqft
+
+    )
+
+    return df
+
+
+# --------------------------------------------------
+# FIELD INVENTORY REQUIREMENT
+# --------------------------------------------------
+
+def calculate_field_inventory_requirement(
+    team_production_df,
+    safety_days=2,
+    gum_per_1000_sqft=5
+):
+    """
+    Minimum inventory to keep at field.
+    """
+
+    rows = []
+
+    for _, row in team_production_df.iterrows():
+
+        daily_media = row[
+            "Real Productivity"
+        ]
+
+        daily_gum = (
+
+            daily_media /
+            1000 *
+            gum_per_1000_sqft
+
+        )
+
+        rows.append({
+
+            "Team Name":
+                row["Team Name"],
+
+            "Safety Media":
+                round(
+                    daily_media *
+                    safety_days,
+                    2
+                ),
+
+            "Safety Gum":
+                round(
+                    daily_gum *
+                    safety_days,
+                    2
                 )
 
         })
 
-    return pd.DataFrame(
-        calendar_rows
-    )
+    return pd.DataFrame(rows)
 
 
-def generate_dispatch_summary(
-    dispatch_schedule_df
+# --------------------------------------------------
+# DISPATCH SUMMARY
+# --------------------------------------------------
+
+def build_dispatch_summary(
+    dispatch_df
 ):
     """
-    Dispatch KPI Summary.
+    High-level dispatch KPIs.
     """
 
     total_dispatches = len(
-        dispatch_schedule_df
+        dispatch_df
     )
 
     total_media = (
-        dispatch_schedule_df[
+
+        dispatch_df[
             "Media Qty (Sq Ft)"
         ]
+
         .sum()
+
     )
 
     total_gum = (
-        dispatch_schedule_df[
+
+        dispatch_df[
             "Gum Qty (Kg)"
         ]
+
         .sum()
+
+    )
+
+    first_dispatch = (
+
+        dispatch_df[
+            "Dispatch Date"
+        ]
+
+        .min()
+
+    )
+
+    last_dispatch = (
+
+        dispatch_df[
+            "Dispatch Date"
+        ]
+
+        .max()
+
     )
 
     return {
@@ -289,6 +405,86 @@ def generate_dispatch_summary(
             round(total_media, 2),
 
         "Total Gum":
-            round(total_gum, 2)
+            round(total_gum, 2),
+
+        "First Dispatch":
+            first_dispatch,
+
+        "Last Dispatch":
+            last_dispatch
 
     }
+
+
+# --------------------------------------------------
+# WAREHOUSE DISPATCH LOAD
+# --------------------------------------------------
+
+def generate_warehouse_loading(
+    dispatch_df
+):
+    """
+    Daily warehouse loading.
+    """
+
+    warehouse = (
+
+        dispatch_df
+
+        .groupby(
+            "Dispatch Date",
+            as_index=False
+        )
+
+        .agg({
+
+            "Media Qty (Sq Ft)":
+                "sum",
+
+            "Gum Qty (Kg)":
+                "sum"
+
+        })
+
+    )
+
+    return warehouse
+
+
+# --------------------------------------------------
+# TEAM EXHAUSTION TRACKER
+# --------------------------------------------------
+
+def generate_exhaustion_tracker(
+    dispatch_df
+):
+    """
+    Track when teams run out of stock.
+    """
+
+    tracker = dispatch_df[
+
+        [
+
+            "Team Name",
+            "Dispatch No",
+            "Cycle End"
+
+        ]
+
+    ].copy()
+
+    tracker.rename(
+
+        columns={
+
+            "Cycle End":
+                "Expected Exhaustion"
+
+        },
+
+        inplace=True
+
+    )
+
+    return tracker

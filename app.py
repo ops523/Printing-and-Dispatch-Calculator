@@ -3196,7 +3196,7 @@ if (
     st.metric(
         "Forecast Finish",
         revised_completion_date.strftime("%d-%b-%Y")
-    )
+        )
 
     st.divider()
 

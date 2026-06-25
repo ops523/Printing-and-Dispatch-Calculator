@@ -4,292 +4,342 @@ import io
 import pandas as pd
 
 
-def create_excel_export(
-    summary_df,
-    district_df,
-    state_allocation_df,
-    dispatch_schedule_df,
-    dispatch_manifest_df,
-    printing_plan_df,
-    roll_summary_df,
-    kpi_dashboard
+# --------------------------------------------------
+# SAFE SHEET WRITER
+# --------------------------------------------------
+
+def write_sheet(
+    writer,
+    df,
+    sheet_name
 ):
     """
-    Create Excel workbook and return bytes.
+    Write dataframe safely.
     """
 
-    output = io.BytesIO()
+    if df is None:
+        return
 
-    with pd.ExcelWriter(
-        output,
-        engine="xlsxwriter"
-    ) as writer:
+    if len(df) == 0:
+        return
 
-        # ---------------------------------
-        # Campaign Summary
-        # ---------------------------------
+    df.to_excel(
+        writer,
+        sheet_name=sheet_name[:31],
+        index=False
+    )
 
-        summary_df.to_excel(
-            writer,
-            sheet_name="Campaign Summary",
-            index=False
-        )
 
-        # ---------------------------------
-        # District Allocation
-        # ---------------------------------
+# --------------------------------------------------
+# DASHBOARD SHEET
+# --------------------------------------------------
 
-        district_df.to_excel(
-            writer,
-            sheet_name="District Allocation",
-            index=False
-        )
+def build_dashboard_sheet(
+    dashboard_dict
+):
+    """
+    Convert dashboard dictionary
+    into dataframe.
+    """
 
-        # ---------------------------------
-        # State Allocation
-        # ---------------------------------
+    rows = []
 
-        state_allocation_df.to_excel(
-            writer,
-            sheet_name="State Allocation",
-            index=False
-        )
+    for key, value in dashboard_dict.items():
 
-        # ---------------------------------
-        # Dispatch Schedule
-        # ---------------------------------
+        rows.append({
 
-        dispatch_schedule_df.to_excel(
-            writer,
-            sheet_name="Dispatch Schedule",
-            index=False
-        )
+            "Metric": key,
 
-        # ---------------------------------
-        # Dispatch Manifest
-        # ---------------------------------
+            "Value": value
 
-        dispatch_manifest_df.to_excel(
-            writer,
-            sheet_name="Dispatch Manifest",
-            index=False
-        )
-
-        # ---------------------------------
-        # Printing Plan
-        # ---------------------------------
-
-        printing_plan_df.to_excel(
-            writer,
-            sheet_name="Printing Plan",
-            index=False
-        )
-
-        # ---------------------------------
-        # Roll Summary
-        # ---------------------------------
-
-        roll_summary_df.to_excel(
-            writer,
-            sheet_name="Roll Summary",
-            index=False
-        )
-
-        # ---------------------------------
-        # KPI Dashboard
-        # ---------------------------------
-
-        kpi_df = pd.DataFrame(
-            list(kpi_dashboard.items()),
-            columns=["Metric", "Value"]
-        )
-
-        kpi_df.to_excel(
-            writer,
-            sheet_name="KPI Dashboard",
-            index=False
-        )
-
-        # ---------------------------------
-        # Formatting
-        # ---------------------------------
-
-        workbook = writer.book
-
-        header_format = workbook.add_format({
-            "bold": True,
-            "border": 1
         })
 
-        for sheet_name, df in {
-
-            "Campaign Summary":
-                summary_df,
-
-            "District Allocation":
-                district_df,
-
-            "State Allocation":
-                state_allocation_df,
-
-            "Dispatch Schedule":
-                dispatch_schedule_df,
-
-            "Dispatch Manifest":
-                dispatch_manifest_df,
-
-            "Printing Plan":
-                printing_plan_df,
-
-            "Roll Summary":
-                roll_summary_df,
-
-            "KPI Dashboard":
-                kpi_df
-
-        }.items():
-
-            worksheet = writer.sheets[
-                sheet_name
-            ]
-
-            for col_num, value in enumerate(
-                df.columns.values
-            ):
-
-                worksheet.write(
-                    0,
-                    col_num,
-                    value,
-                    header_format
-                )
-
-                worksheet.set_column(
-                    col_num,
-                    col_num,
-                    max(
-                        18,
-                        len(str(value)) + 5
-                    )
-                )
-
-    output.seek(0)
-
-    return output.getvalue()
+    return pd.DataFrame(rows)
 
 
-def build_kpi_dashboard(
-    total_campaign_sqft,
-    total_teams,
-    daily_campaign_production,
-    dispatch_media_qty,
-    dispatch_gum_qty,
-    total_dispatches,
-    total_media_weight,
-    total_running_feet,
-    avg_printer_utilization
+# --------------------------------------------------
+# MAIN EXPORT FUNCTION
+# --------------------------------------------------
+
+def create_excel_export(
+    team_plan_df=None,
+    team_summary_df=None,
+    district_summary_df=None,
+    state_summary_df=None,
+    team_loading_df=None,
+    production_df=None,
+    weekly_production_df=None,
+    campaign_forecast_df=None,
+    media_forecast_df=None,
+    gum_forecast_df=None,
+    dispatch_df=None,
+    dispatch_calendar_df=None,
+    arrival_calendar_df=None,
+    print_schedule_df=None,
+    daily_print_df=None,
+    printer_loading_df=None,
+    roll_procurement_df=None,
+    gum_procurement_df=None,
+    purchase_plan_df=None,
+    roll_inventory_df=None,
+    gum_inventory_df=None,
+    po_tracker_df=None,
+    stockout_df=None,
+    reforecast_df=None,
+    dashboard_dict=None
 ):
     """
-    KPI dashboard dictionary.
+    Create complete workbook.
     """
-
-    return {
-
-        "Total Campaign Sq Ft":
-            round(total_campaign_sqft, 2),
-
-        "Total Teams":
-            total_teams,
-
-        "Daily Production":
-            round(
-                daily_campaign_production,
-                2
-            ),
-
-        "Media Per Dispatch":
-            round(
-                dispatch_media_qty,
-                2
-            ),
-
-        "Gum Per Dispatch (Kg)":
-            round(
-                dispatch_gum_qty,
-                2
-            ),
-
-        "Total Dispatches":
-            total_dispatches,
-
-        "Total Running Feet":
-            round(
-                total_running_feet,
-                2
-            ),
-
-        "Total Media Weight (Kg)":
-            round(
-                total_media_weight,
-                2
-            ),
-
-        "Average Printer Utilization %":
-            round(
-                avg_printer_utilization,
-                2
-            )
-
-    }
-
-
-def create_sample_upload_template():
-    """
-    Create sample deployment file
-    for users to download.
-    """
-
-    sample_df = pd.DataFrame({
-
-        "State": [
-
-            "Maharashtra",
-            "Karnataka",
-            "Gujarat"
-
-        ],
-
-        "District": [
-
-            "Pune",
-            "Bengaluru",
-            "Ahmedabad"
-
-        ],
-
-        "Teams": [
-
-            5,
-            4,
-            6
-
-        ]
-
-    })
 
     output = io.BytesIO()
 
     with pd.ExcelWriter(
         output,
-        engine="xlsxwriter"
+        engine="openpyxl"
     ) as writer:
 
-        sample_df.to_excel(
+        # ---------------------------------
+        # MASTER DATA
+        # ---------------------------------
+
+        write_sheet(
             writer,
-            sheet_name="Deployment",
-            index=False
+            team_plan_df,
+            "Team Plan"
         )
+
+        write_sheet(
+            writer,
+            team_summary_df,
+            "Team Summary"
+        )
+
+        write_sheet(
+            writer,
+            district_summary_df,
+            "District Summary"
+        )
+
+        write_sheet(
+            writer,
+            state_summary_df,
+            "State Summary"
+        )
+
+        write_sheet(
+            writer,
+            team_loading_df,
+            "Team Loading"
+        )
+
+        # ---------------------------------
+        # PRODUCTION
+        # ---------------------------------
+
+        write_sheet(
+            writer,
+            production_df,
+            "Production Plan"
+        )
+
+        write_sheet(
+            writer,
+            weekly_production_df,
+            "Weekly Production"
+        )
+
+        write_sheet(
+            writer,
+            campaign_forecast_df,
+            "Campaign Forecast"
+        )
+
+        write_sheet(
+            writer,
+            media_forecast_df,
+            "Media Forecast"
+        )
+
+        write_sheet(
+            writer,
+            gum_forecast_df,
+            "Gum Forecast"
+        )
+
+        # ---------------------------------
+        # DISPATCH
+        # ---------------------------------
+
+        write_sheet(
+            writer,
+            dispatch_df,
+            "Dispatch Plan"
+        )
+
+        write_sheet(
+            writer,
+            dispatch_calendar_df,
+            "Dispatch Calendar"
+        )
+
+        write_sheet(
+            writer,
+            arrival_calendar_df,
+            "Arrival Calendar"
+        )
+
+        # ---------------------------------
+        # PRINTING
+        # ---------------------------------
+
+        write_sheet(
+            writer,
+            print_schedule_df,
+            "Print Schedule"
+        )
+
+        write_sheet(
+            writer,
+            daily_print_df,
+            "Daily Print Plan"
+        )
+
+        write_sheet(
+            writer,
+            printer_loading_df,
+            "Printer Loading"
+        )
+
+        # ---------------------------------
+        # PROCUREMENT
+        # ---------------------------------
+
+        write_sheet(
+            writer,
+            roll_procurement_df,
+            "Roll Procurement"
+        )
+
+        write_sheet(
+            writer,
+            gum_procurement_df,
+            "Gum Procurement"
+        )
+
+        write_sheet(
+            writer,
+            purchase_plan_df,
+            "Purchase Plan"
+        )
+
+        # ---------------------------------
+        # INVENTORY
+        # ---------------------------------
+
+        write_sheet(
+            writer,
+            roll_inventory_df,
+            "Roll Inventory"
+        )
+
+        write_sheet(
+            writer,
+            gum_inventory_df,
+            "Gum Inventory"
+        )
+
+        write_sheet(
+            writer,
+            po_tracker_df,
+            "PO Tracker"
+        )
+
+        write_sheet(
+            writer,
+            stockout_df,
+            "Stockout Forecast"
+        )
+
+        # ---------------------------------
+        # REFORECAST
+        # ---------------------------------
+
+        write_sheet(
+            writer,
+            reforecast_df,
+            "Reforecast"
+        )
+
+        # ---------------------------------
+        # DASHBOARD
+        # ---------------------------------
+
+        if dashboard_dict:
+
+            dashboard_df = (
+                build_dashboard_sheet(
+                    dashboard_dict
+                )
+            )
+
+            write_sheet(
+                writer,
+                dashboard_df,
+                "Dashboard"
+            )
 
     output.seek(0)
 
-    return output.getvalue()
+    return output
+
+
+# --------------------------------------------------
+# DOWNLOAD BUTTON HELPER
+# --------------------------------------------------
+
+def get_excel_download_data(
+    excel_buffer
+):
+    """
+    Returns binary data
+    for st.download_button()
+    """
+
+    return excel_buffer.getvalue()
+
+
+# --------------------------------------------------
+# CONSOLIDATED KPI BUILDER
+# --------------------------------------------------
+
+def build_master_dashboard(
+    project_summary=None,
+    production_kpis=None,
+    procurement_kpis=None,
+    printing_kpis=None,
+    inventory_kpis=None,
+    reforecast_kpis=None
+):
+    """
+    Consolidate all KPIs.
+    """
+
+    dashboard = {}
+
+    for source in [
+
+        project_summary,
+        production_kpis,
+        procurement_kpis,
+        printing_kpis,
+        inventory_kpis,
+        reforecast_kpis
+
+    ]:
+
+        if source:
+
+            dashboard.update(source)
+
+    return dashboard

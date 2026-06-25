@@ -1,626 +1,707 @@
-# app.py
+# =====================================================
+# APP.PY - PART 1
+# Imports + Config + Sidebar + Uploads
+# =====================================================
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import numpy as np
+from datetime import datetime
+import io
+import os
 
-from modules.scenario_analysis import (
-    dispatch_cycle_comparison
-)
+# =====================================================
+# MODULE IMPORTS
+# =====================================================
 
-from modules.calculations import (
-    validate_deployment_file,
-    calculate_effective_productivity,
-    calculate_total_teams,
-    calculate_daily_campaign_production,
-    calculate_dispatch_requirement,
-    calculate_gum_requirement,
-    build_campaign_summary,
-    build_state_allocation
-)
+from modules.teams import *
+from modules.sequencing import *
+from modules.production import *
+from modules.printing import *
+from modules.dispatch import *
+from modules.procurement import *
+from modules.inventory import *
+from modules.reforecast import *
+from modules.dashboard import *
+from modules.exports import *
 
-from modules.dispatch import (
-    generate_dispatch_schedule,
-    generate_dispatch_manifest,
-    generate_dispatch_summary
-)
-
-from modules.printing import (
-    generate_printing_plan,
-    build_roll_summary,
-    generate_printer_loading_dashboard
-)
-
-from modules.exports import (
-    create_excel_export,
-    build_kpi_dashboard,
-    create_sample_upload_template
-)
-
-# --------------------------------------------------
+# =====================================================
 # PAGE CONFIG
-# --------------------------------------------------
+# =====================================================
 
 st.set_page_config(
-    page_title="Media Production & Dispatch Planner",
-    page_icon="🚚",
+    page_title="Digital Wall Painting Supply Chain Planner",
+    page_icon="📦",
     layout="wide"
 )
 
-# --------------------------------------------------
+# =====================================================
 # LOGO
-# --------------------------------------------------
+# =====================================================
 
-try:
-    st.image(
-        "assets/logo.png",
-        width=300
+LOGO_PATH = "assets/logo.png"
+
+col1, col2 = st.columns([1, 5])
+
+with col1:
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, width=120)
+
+with col2:
+    st.title("Digital Wall Painting Supply Chain Planner")
+    st.caption(
+        "Production • Printing • Dispatch • Procurement • Inventory Planning"
     )
-except:
-    pass
-
-st.title("Media Production & Dispatch Planner V1")
-st.caption(
-    "Digital Wall Campaign Printing, Dispatch & Gum Planning"
-)
-
-# --------------------------------------------------
-# SAMPLE TEMPLATE
-# --------------------------------------------------
-
-sample_template = create_sample_upload_template()
-
-st.download_button(
-    label="📥 Download Deployment Template",
-    data=sample_template,
-    file_name="deployment_template.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
 
 st.divider()
 
-# --------------------------------------------------
-# CAMPAIGN DETAILS
-# --------------------------------------------------
+# =====================================================
+# SESSION STATE
+# =====================================================
 
-st.header("Campaign Inputs")
+if "project_loaded" not in st.session_state:
+    st.session_state.project_loaded = False
 
-c1, c2 = st.columns(2)
+if "team_plan_df" not in st.session_state:
+    st.session_state.team_plan_df = None
 
-with c1:
+# =====================================================
+# SIDEBAR
+# =====================================================
 
-    campaign_name = st.text_input(
-        "Campaign Name",
-        value="New Campaign"
-    )
+st.sidebar.header("Project Settings")
 
-    total_campaign_sqft = st.number_input(
-        "Total Campaign Sq Ft",
-        min_value=1.0,
-        value=500000.0
-    )
+# =====================================================
+# PROJECT MODE
+# =====================================================
 
-with c2:
-
-    campaign_start_date = st.date_input(
-        "Campaign Start Date"
-    )
-
-# --------------------------------------------------
-# PRODUCTIVITY
-# --------------------------------------------------
-
-st.header("Team Productivity")
-
-c1, c2, c3 = st.columns(3)
-
-with c1:
-
-    target_sqft_per_team_day = st.number_input(
-        "Target Sq Ft / Team / Day",
-        min_value=1.0,
-        value=500.0
-    )
-
-with c2:
-
-    efficiency_pct = st.number_input(
-        "Efficiency %",
-        min_value=1.0,
-        max_value=100.0,
-        value=85.0
-    )
-
-with c3:
-
-    gum_per_1000_sqft = st.number_input(
-        "Gum Kg / 1000 Sq Ft",
-        min_value=0.0,
-        value=5.0
-    )
-
-# --------------------------------------------------
-# LOGISTICS
-# --------------------------------------------------
-
-st.header("Logistics Planning")
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-
-    dispatch_cycle_days = st.selectbox(
-        "Dispatch Cycle",
-        [7, 8, 9, 10],
-        index=0
-    )
-
-with c2:
-
-    transit_days = st.number_input(
-        "Transit Time (Days)",
-        min_value=1,
-        value=3
-    )
-
-with c3:
-
-    arrival_buffer_days = st.number_input(
-        "Arrival Buffer (Days)",
-        min_value=1,
-        value=2
-    )
-
-with c4:
-
-    field_inventory_buffer = st.number_input(
-        "Field Inventory Buffer (Days)",
-        min_value=0,
-        value=2
-    )
-
-# --------------------------------------------------
-# PRINTING
-# --------------------------------------------------
-
-st.header("Printing Parameters")
-
-p1, p2, p3, p4 = st.columns(4)
-
-with p1:
-
-    printing_lead_days = st.number_input(
-        "Printing Lead Time",
-        min_value=1,
-        value=2
-    )
-
-with p2:
-
-    printer_capacity_per_day = st.number_input(
-        "Printer Capacity / Day",
-        min_value=1.0,
-        value=25000.0
-    )
-
-with p3:
-
-    media_width_ft = st.number_input(
-        "Media Width (Ft)",
-        min_value=1.0,
-        value=4.0
-    )
-
-with p4:
-
-    media_gsm = st.number_input(
-        "Media GSM",
-        min_value=1.0,
-        value=110.0
-    )
-
-roll_length_ft = st.number_input(
-    "Roll Length (Ft)",
-    min_value=1.0,
-    value=500.0
+project_mode = st.sidebar.radio(
+    "Project Mode",
+    [
+        "New Campaign",
+        "Running Campaign"
+    ]
 )
 
-# --------------------------------------------------
-# DEPLOYMENT FILE
-# --------------------------------------------------
+# =====================================================
+# PRODUCTIVITY SETTINGS
+# =====================================================
 
-st.header("Deployment Plan Upload")
+st.sidebar.subheader("Team Productivity")
+
+daily_productivity = st.sidebar.number_input(
+    "Expected Sq Ft / Team / Day",
+    min_value=1,
+    value=500
+)
+
+achievement_factor = st.sidebar.slider(
+    "Average Achievement %",
+    min_value=50,
+    max_value=100,
+    value=85
+)
+
+travel_loss_days = st.sidebar.number_input(
+    "Travel Days Lost Per Month",
+    min_value=0,
+    max_value=15,
+    value=5
+)
+
+# =====================================================
+# PRINTING SETTINGS
+# =====================================================
+
+st.sidebar.subheader("Printing Settings")
+
+daily_print_capacity = st.sidebar.number_input(
+    "Daily Print Capacity (Sq Ft)",
+    min_value=1000,
+    value=20000
+)
+
+printing_wastage = st.sidebar.slider(
+    "Printing Wastage %",
+    min_value=0,
+    max_value=30,
+    value=12
+)
+
+# =====================================================
+# MEDIA SETTINGS
+# =====================================================
+
+st.sidebar.subheader("Media Roll Settings")
+
+roll_size_sqft = st.sidebar.number_input(
+    "Roll Size (Sq Ft)",
+    min_value=100,
+    value=1250
+)
+
+roll_lead_time = st.sidebar.number_input(
+    "Roll Lead Time (Days)",
+    min_value=1,
+    value=3
+)
+
+# =====================================================
+# GUM SETTINGS
+# =====================================================
+
+st.sidebar.subheader("Gum Settings")
+
+gum_per_1000_sqft = st.sidebar.number_input(
+    "Gum Required per 1000 Sq Ft (Kg)",
+    min_value=1.0,
+    value=5.0
+)
+
+gum_lead_time = st.sidebar.number_input(
+    "Gum Lead Time (Days)",
+    min_value=1,
+    value=7
+)
+
+# =====================================================
+# DISPATCH SETTINGS
+# =====================================================
+
+st.sidebar.subheader("Dispatch Settings")
+
+dispatch_cycle_days = st.sidebar.number_input(
+    "Dispatch Coverage Days",
+    min_value=1,
+    max_value=30,
+    value=10
+)
+
+arrival_buffer_days = st.sidebar.number_input(
+    "Arrival Buffer Days",
+    min_value=0,
+    max_value=10,
+    value=2
+)
+
+# =====================================================
+# INVENTORY SETTINGS
+# =====================================================
+
+st.sidebar.subheader("Inventory Settings")
+
+opening_roll_stock = st.sidebar.number_input(
+    "Opening Roll Inventory",
+    min_value=0,
+    value=100
+)
+
+opening_gum_stock = st.sidebar.number_input(
+    "Opening Gum Inventory (Kg)",
+    min_value=0,
+    value=1000
+)
+
+safety_roll_stock = st.sidebar.number_input(
+    "Safety Roll Stock",
+    min_value=0,
+    value=25
+)
+
+safety_gum_stock = st.sidebar.number_input(
+    "Safety Gum Stock (Kg)",
+    min_value=0,
+    value=200
+)
+
+# =====================================================
+# FILE UPLOAD SECTION
+# =====================================================
+
+st.header("Project Upload")
+
+st.info(
+    """
+Upload the Team Planning File.
+
+Required Columns:
+
+- Team Name
+- Team Start Date
+- Sequence
+- State
+- District
+- Wall Count
+- Avg Wall Size
+- Transit Days
+- Travel Days
+"""
+)
 
 uploaded_file = st.file_uploader(
-    "Upload Excel File",
-    type=["xlsx"]
+    "Upload Team Planning Excel",
+    type=["xlsx", "xls", "csv"]
 )
 
-if uploaded_file is None:
-    st.info(
-        "Upload deployment file to continue."
+# =====================================================
+# LOAD DATA
+# =====================================================
+
+team_plan_df = None
+
+if uploaded_file is not None:
+
+    try:
+
+        if uploaded_file.name.endswith(".csv"):
+
+            team_plan_df = pd.read_csv(
+                uploaded_file
+            )
+
+        else:
+
+            team_plan_df = pd.read_excel(
+                uploaded_file
+            )
+
+        st.success(
+            f"{len(team_plan_df):,} rows loaded successfully"
+        )
+
+        st.dataframe(
+            team_plan_df.head(),
+            use_container_width=True
+        )
+
+        st.session_state.team_plan_df = team_plan_df
+        st.session_state.project_loaded = True
+
+    except Exception as e:
+
+        st.error(
+            f"Error loading file: {e}"
+        )
+
+# =====================================================
+# RUNNING CAMPAIGN INPUTS
+# =====================================================
+
+if project_mode == "Running Campaign":
+
+    st.header("Current Project Status")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        completed_sqft = st.number_input(
+            "Completed Sq Ft",
+            min_value=0,
+            value=0
+        )
+
+    with col2:
+
+        media_in_field = st.number_input(
+            "Media in Field (Sq Ft)",
+            min_value=0,
+            value=0
+        )
+
+    with col3:
+
+        gum_in_field = st.number_input(
+            "Gum in Field (Kg)",
+            min_value=0,
+            value=0
+        )
+
+# =====================================================
+# TEMPLATE DOWNLOADS
+# =====================================================
+
+st.header("Templates")
+
+template_df = pd.DataFrame({
+
+    "Team Name": ["Team A"],
+
+    "Team Start Date": ["01-Jul-2026"],
+
+    "Sequence": [1],
+
+    "State": ["Maharashtra"],
+
+    "District": ["Pune"],
+
+    "Wall Count": [50],
+
+    "Avg Wall Size": [250],
+
+    "Transit Days": [2],
+
+    "Travel Days": [1]
+
+})
+
+template_buffer = io.BytesIO()
+
+with pd.ExcelWriter(
+    template_buffer,
+    engine="openpyxl"
+) as writer:
+
+    template_df.to_excel(
+        writer,
+        index=False,
+        sheet_name="Template"
     )
-    st.stop()
 
-deployment_df = pd.read_excel(
-    uploaded_file
-)
-
-valid, missing = validate_deployment_file(
-    deployment_df
-)
-
-if not valid:
-
-    st.error(
-        f"Missing Columns: {', '.join(missing)}"
-    )
-
-    st.stop()
-
-# --------------------------------------------------
-# CALCULATIONS
-# --------------------------------------------------
-
-effective_productivity = (
-    calculate_effective_productivity(
-        target_sqft_per_team_day,
-        efficiency_pct
-    )
-)
-
-total_teams = calculate_total_teams(
-    deployment_df
-)
-
-daily_campaign_production = (
-    calculate_daily_campaign_production(
-        total_teams,
-        effective_productivity
-    )
-)
-
-dispatch_media_qty = (
-    calculate_dispatch_requirement(
-        daily_campaign_production,
-        dispatch_cycle_days
-    )
-)
-
-dispatch_gum_qty = (
-    calculate_gum_requirement(
-        dispatch_media_qty,
-        gum_per_1000_sqft
-    )
-)
-
-summary_df = build_campaign_summary(
-    campaign_name,
-    total_campaign_sqft,
-    total_teams,
-    effective_productivity,
-    daily_campaign_production,
-    dispatch_cycle_days,
-    dispatch_media_qty,
-    dispatch_gum_qty
-)
-
-state_allocation_df = (
-    build_state_allocation(
-        deployment_df,
-        effective_productivity,
-        dispatch_cycle_days,
-        gum_per_1000_sqft
-    )
-)
-
-dispatch_schedule_df = (
-    generate_dispatch_schedule(
-        campaign_start_date,
-        total_campaign_sqft,
-        daily_campaign_production,
-        dispatch_cycle_days,
-        transit_days,
-        arrival_buffer_days,
-        gum_per_1000_sqft
-    )
-)
-campaign_duration_days = len(
-    dispatch_schedule_df
-) * dispatch_cycle_days
-
-dispatch_manifest_df = (
-    generate_dispatch_manifest(
-        dispatch_schedule_df,
-        state_allocation_df
-    )
-)
-
-printing_plan_df = (
-    generate_printing_plan(
-        dispatch_schedule_df,
-        printing_lead_days,
-        printer_capacity_per_day,
-        media_width_ft,
-        media_gsm
-    )
-)
-
-roll_summary_df = (
-    build_roll_summary(
-        printing_plan_df,
-        media_width_ft,
-        roll_length_ft
-    )
-)
-
-comparison_df = (
-    dispatch_cycle_comparison(
-
-        daily_campaign_production,
-
-        total_campaign_sqft,
-
-        gum_per_1000_sqft
-
-    )
-)
-
-# --------------------------------------------------
-# KPI DASHBOARD
-# --------------------------------------------------
-
-dispatch_summary = (
-    generate_dispatch_summary(
-        dispatch_schedule_df
-    )
-)
-
-printer_dashboard = (
-    generate_printer_loading_dashboard(
-        printing_plan_df,
-        printer_capacity_per_day
-    )
-)
-
-kpi_dashboard = build_kpi_dashboard(
-
-    total_campaign_sqft=
-        total_campaign_sqft,
-
-    total_teams=
-        total_teams,
-
-    daily_campaign_production=
-        daily_campaign_production,
-
-    dispatch_media_qty=
-        dispatch_media_qty,
-
-    dispatch_gum_qty=
-        dispatch_gum_qty,
-
-    total_dispatches=
-        dispatch_summary[
-            "Total Dispatches"
-        ],
-
-    total_media_weight=
-        printer_dashboard[
-            "Total Media Weight"
-        ],
-
-    total_running_feet=
-        printer_dashboard[
-            "Total Running Feet"
-        ],
-
-    avg_printer_utilization=
-        printer_dashboard[
-            "Average Utilization %"
-        ]
-)
-
-# --------------------------------------------------
-# KPI DISPLAY
-# --------------------------------------------------
-
-st.header("Campaign Dashboard")
-
-k1, k2, k3, k4, k5 = st.columns(5)
-
-k1.metric(
-    "Teams",
-    total_teams
-)
-
-k2.metric(
-    "Campaign Duration",
-    f"{campaign_duration_days} Days"
-)
-
-k3.metric(
-    "Daily Production",
-    f"{daily_campaign_production:,.0f}"
-)
-
-k4.metric(
-    "Media/Dispatch",
-    f"{dispatch_media_qty:,.0f}"
-)
-
-k5.metric(
-    "Gum/Dispatch",
-    f"{dispatch_gum_qty:,.1f} Kg"
-)
-
-# --------------------------------------------------
-# DATA TABLES
-# --------------------------------------------------
-
-st.header("Campaign Summary")
-st.dataframe(
-    summary_df,
-    use_container_width=True
-)
-
-st.header("District Allocation")
-st.dataframe(
-    deployment_df,
-    use_container_width=True
-)
-
-st.header("State Allocation")
-st.dataframe(
-    state_allocation_df,
-    use_container_width=True
-)
-
-st.subheader(
-    "State-wise Media Allocation"
-)
-
-fig_state = px.bar(
-
-    state_allocation_df,
-
-    x="State",
-
-    y="Media Qty (Sq Ft)",
-
-    title="Media Allocation by State"
-
-)
-
-st.plotly_chart(
-    fig_state,
-    use_container_width=True
-)
-
-st.header("Dispatch Schedule")
-st.dataframe(
-    dispatch_schedule_df,
-    use_container_width=True
-)
-
-st.subheader(
-    "Dispatch Timeline"
-)
-
-timeline_df = dispatch_schedule_df.copy()
-
-timeline_df["Dispatch"] = (
-    "Dispatch "
-    +
-    timeline_df["Dispatch No"].astype(str)
-)
-
-fig_timeline = px.scatter(
-
-    timeline_df,
-
-    x="Dispatch Date",
-
-    y="Dispatch",
-
-    size="Media Qty (Sq Ft)",
-
-    title="Dispatch Timeline"
-
-)
-
-st.plotly_chart(
-    fig_timeline,
-    use_container_width=True
-)
-
-st.header("Dispatch Manifest")
-st.dataframe(
-    dispatch_manifest_df,
-    use_container_width=True
-)
-
-st.header("Printing Plan")
-st.dataframe(
-    printing_plan_df,
-    use_container_width=True
-)
-
-st.subheader(
-    "Printing Load by Dispatch"
-)
-
-fig_print = px.bar(
-
-    printing_plan_df,
-
-    x="Dispatch No",
-
-    y="Media Qty (Sq Ft)",
-
-    title="Media Qty per Dispatch"
-
-)
-
-st.plotly_chart(
-    fig_print,
-    use_container_width=True
-)
-
-st.header("Roll Summary")
-st.dataframe(
-    roll_summary_df,
-    use_container_width=True
-)
-
-st.header(
-    "Dispatch Cycle Comparison"
-)
-
-st.dataframe(
-    comparison_df,
-    use_container_width=True
-)
-
-st.subheader(
-    "Dispatch Cycle vs Dispatch Count"
-)
-
-fig_compare = px.line(
-
-    comparison_df,
-
-    x="Dispatch Cycle",
-
-    y="Dispatches",
-
-    markers=True
-
-)
-
-st.plotly_chart(
-    fig_compare,
-    use_container_width=True
-)
-
-# --------------------------------------------------
-# EXCEL EXPORT
-# --------------------------------------------------
-
-excel_file = create_excel_export(
-    summary_df,
-    deployment_df,
-    state_allocation_df,
-    dispatch_schedule_df,
-    dispatch_manifest_df,
-    printing_plan_df,
-    roll_summary_df,
-    kpi_dashboard
-)
+template_buffer.seek(0)
 
 st.download_button(
-    label="📊 Download Planning Workbook",
-    data=excel_file,
-    file_name="media_dispatch_planner.xlsx",
+    label="📥 Download Upload Template",
+    data=template_buffer.getvalue(),
+    file_name="Team_Planning_Template.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
+# =====================================================
+# END OF PART 1
+# =====================================================
+
+# =====================================================
+# PART 2
+# VALIDATION + SEQUENCING + TEAM PLANNING
+# =====================================================
+
+if st.session_state.project_loaded:
+
+    team_plan_df = st.session_state.team_plan_df
+
+    # =================================================
+    # VALIDATE INPUT FILE
+    # =================================================
+
+    valid, missing_cols = validate_sequence_columns(
+        team_plan_df
+    )
+
+    if not valid:
+
+        st.error(
+            f"Missing required columns: {', '.join(missing_cols)}"
+        )
+
+        st.stop()
+
+    # =================================================
+    # PREPARE DATA
+    # =================================================
+
+    try:
+
+        prepared_df = prepare_sequence_plan(
+            team_plan_df
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Preparation Error: {e}"
+        )
+
+        st.stop()
+
+    # =================================================
+    # CALCULATE REAL PRODUCTIVITY
+    # =================================================
+
+    # Achievement factor adjustment
+
+    effective_productivity = (
+
+        daily_productivity
+
+        *
+
+        (achievement_factor / 100)
+
+    )
+
+    # Travel loss adjustment
+
+    working_days_per_month = max(
+        30 - travel_loss_days,
+        1
+    )
+
+    utilization_factor = (
+
+        working_days_per_month / 30
+
+    )
+
+    real_productivity = (
+
+        effective_productivity
+
+        *
+
+        utilization_factor
+
+    )
+
+    # =================================================
+    # BUILD DISTRICT TIMELINE
+    # =================================================
+
+    district_timeline_df = build_district_timeline(
+        prepared_df,
+        real_productivity
+    )
+
+    # =================================================
+    # TEAM SUMMARY
+    # =================================================
+
+    team_summary_df = build_team_completion_summary(
+        district_timeline_df
+    )
+
+    # =================================================
+    # DISTRICT COMPLETION
+    # =================================================
+
+    district_completion_df = (
+        build_district_completion_calendar(
+            district_timeline_df
+        )
+    )
+
+    # =================================================
+    # MOVEMENT PLAN
+    # =================================================
+
+    movement_df = build_team_movement_plan(
+        district_timeline_df
+    )
+
+    # =================================================
+    # WEEKLY TEAM LOADING
+    # =================================================
+
+    weekly_loading_df = (
+        build_weekly_team_loading(
+            district_timeline_df
+        )
+    )
+
+    # =================================================
+    # TIMELINE KPIs
+    # =================================================
+
+    timeline_kpis = build_timeline_kpis(
+        district_timeline_df
+    )
+
+    # =================================================
+    # SAVE TO SESSION
+    # =================================================
+
+    st.session_state.prepared_df = prepared_df
+
+    st.session_state.district_timeline_df = (
+        district_timeline_df
+    )
+
+    st.session_state.team_summary_df = (
+        team_summary_df
+    )
+
+    st.session_state.movement_df = (
+        movement_df
+    )
+
+    st.session_state.weekly_loading_df = (
+        weekly_loading_df
+    )
+
+    st.session_state.timeline_kpis = (
+        timeline_kpis
+    )
+
+    # =================================================
+    # PROJECT KPIs
+    # =================================================
+
+    st.header("Project Overview")
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+    with kpi1:
+
+        st.metric(
+            "Total Teams",
+            timeline_kpis["Total Teams"]
+        )
+
+    with kpi2:
+
+        st.metric(
+            "Total Districts",
+            timeline_kpis["Total Districts"]
+        )
+
+    with kpi3:
+
+        st.metric(
+            "Total Sq Ft",
+            f"{timeline_kpis['Total Sq Ft']:,.0f}"
+        )
+
+    with kpi4:
+
+        st.metric(
+            "Project Duration (Days)",
+            timeline_kpis["Project Duration"]
+        )
+
+    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
+
+    with kpi5:
+
+        st.metric(
+            "Target Productivity",
+            round(daily_productivity, 0)
+        )
+
+    with kpi6:
+
+        st.metric(
+            "Achievement %",
+            achievement_factor
+        )
+
+    with kpi7:
+
+        st.metric(
+            "Travel Loss Days",
+            travel_loss_days
+        )
+
+    with kpi8:
+
+        st.metric(
+            "Real Productivity",
+            round(real_productivity, 1)
+        )
+
+    st.divider()
+
+    # =================================================
+    # TEAM PLANNING SECTION
+    # =================================================
+
+    planning_tab1, planning_tab2, planning_tab3, planning_tab4 = st.tabs(
+
+        [
+
+            "Team Summary",
+
+            "District Timeline",
+
+            "Team Movements",
+
+            "Weekly Loading"
+
+        ]
+
+    )
+
+    # =================================================
+    # TEAM SUMMARY
+    # =================================================
+
+    with planning_tab1:
+
+        st.subheader(
+            "Team Completion Summary"
+        )
+
+        st.dataframe(
+            team_summary_df,
+            use_container_width=True
+        )
+
+        st.caption(
+            f"Total Teams: {len(team_summary_df)}"
+        )
+
+    # =================================================
+    # DISTRICT TIMELINE
+    # =================================================
+
+    with planning_tab2:
+
+        st.subheader(
+            "District Timeline"
+        )
+
+        st.dataframe(
+            district_timeline_df,
+            use_container_width=True
+        )
+
+        st.caption(
+            f"Total District Records: {len(district_timeline_df)}"
+        )
+
+    # =================================================
+    # MOVEMENTS
+    # =================================================
+
+    with planning_tab3:
+
+        st.subheader(
+            "Team Movement Plan"
+        )
+
+        if len(movement_df):
+
+            st.dataframe(
+                movement_df,
+                use_container_width=True
+            )
+
+        else:
+
+            st.info(
+                "No team movement records found."
+            )
+
+    # =================================================
+    # WEEKLY LOADING
+    # =================================================
+
+    with planning_tab4:
+
+        st.subheader(
+            "Weekly Active Team Loading"
+        )
+
+        st.dataframe(
+            weekly_loading_df,
+            use_container_width=True
+        )
+
+        st.caption(
+            f"Project Weeks: {len(weekly_loading_df)}"
+        )
+
+    st.divider()
+
+# =====================================================
+# END OF PART 2
+# =====================================================

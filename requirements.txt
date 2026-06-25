@@ -1,8 +1,8 @@
-streamlit>=1.45.0
-pandas>=2.2.2
-numpy>=1.26.4
-openpyxl>=3.1.5
-xlsxwriter>=3.2.0
-plotly>=5.24.1
-python-dateutil>=2.9.0
-Pillow>=10.4.0
+streamlit
+pandas
+numpy
+openpyxl
+xlsxwriter
+plotly
+python-dateutil
+Pillow
